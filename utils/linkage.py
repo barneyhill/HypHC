@@ -6,26 +6,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from mst import mst
 from unionfind import unionfind
 from utils.lca import hyp_lca
-
-
-### Single linkage using MST trick
-
-# @profile
-def sl_np_mst(similarities):
-    n = similarities.shape[0]
-    ij, _ = mst.mst(similarities, n)
-    uf = unionfind.UnionFind(n)
-    uf.merge(ij)
-    return uf.tree
-
-def sl_from_embeddings(xs, S):
-    xs0 = xs[None, :, :]
-    xs1 = xs[:, None, :]
-    sim_mat = S(xs0, xs1)  # (n, n)
-    return sl_np_mst(sim_mat.numpy())
 
 ### Single linkage using naive union find
 

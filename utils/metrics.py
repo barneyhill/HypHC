@@ -2,8 +2,6 @@
 
 import numpy as np
 
-#from mst import reorder
-from mst import mst
 from utils.tree import descendants_traversal, descendants_count
 
 
@@ -67,7 +65,9 @@ def dasgupta_cost(tree, similarities):
 
     # reorder similarity matrix for locality
     # similarities = similarities[leaves].T[leaves] # this is the bottleneck; is there a faster way?
-    similarities = mst.reorder(similarities, np.array(leaves), n_leaves)  # this is the bottleneck; is there a faster way?
+    
+    idx = np.array(leaves)
+    similarities = similarities[np.ix_(idx, idx)] # this is the bottleneck; is there a faster way? #changed from pyx to np
 
     # Recursive computation
     children = [list(tree.neighbors(node)) for node in range(n)]  # children remaining to process

@@ -22,20 +22,19 @@ class HCDataset(data.Dataset):
         """
         self.features = features
         self.labels = labels
-        self.similarities = similarities
+        self.similarities = torch.from_numpy(similarities)
         self.n_nodes = self.similarities.shape[0]
-        self.triples = self.generate_triples(num_samples)
+        self.triples = torch.from_numpy(self.generate_triples(num_samples).astype("int64"))
 
     def __len__(self):
         return len(self.triples)
 
     def __getitem__(self, idx):
         triple = self.triples[idx]
-        s12 = self.similarities[triple[0], triple[1]]
-        s13 = self.similarities[triple[0], triple[2]]
-        s23 = self.similarities[triple[1], triple[2]]
-        similarities = np.array([s12, s13, s23])
-        return torch.from_numpy(triple), torch.from_numpy(similarities)
+        similarities = torch.tensor([self.similarities[triple[0], triple[1]], 
+                                     self.similarities[triple[0], triple[2]], 
+                                     self.similarities[triple[1], triple[2]]])
+        return triple, similarities
 
     def generate_triples(self, num_samples):
         logging.info("Generating triples.")
