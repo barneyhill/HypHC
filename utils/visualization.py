@@ -109,3 +109,21 @@ def get_colors(y, color_seed=1234):
         g = np.random.random()
         colors[k] = (r, g, b)
     return [colors[k] for k in y]
+
+def vis_embeddings(model, samples):
+    leaves_embeddings = model.normalize_embeddings(model.embeddings.weight.data)
+    leaves_embeddings = project(leaves_embeddings).detach().cpu()
+    fig = plt.figure(figsize=(5, 5))
+    ax = fig.add_subplot(111)
+    circle = plt.Circle((0, 0), 1.0, color='r', alpha=0.1)
+    ax.add_artist(circle)
+    scatter = ax.scatter(leaves_embeddings[:, 0], leaves_embeddings[:, 1], s=50, alpha=0.6)
+
+    # Adding labels to the plot
+    for i, label in enumerate(samples):
+        ax.annotate(label, (leaves_embeddings[i, 0], leaves_embeddings[i, 1]))
+
+    ax.set_xlim([-1.1, 1.1])
+    ax.set_ylim([-1.1, 1.1])
+    ax.set_aspect('equal', 'box')
+    plt.show()

@@ -7,10 +7,14 @@ import torch.nn.functional as F
 
 from utils.lca import hyp_lca
 from utils.poincare import project
-
-from utils.linkage import nn_merge_uf_fast_np
+from utils.linkage import nn_merge_uf_fast_np, build_ts_from_embeddings
 
 from utils.tree import build_ts_from_parents
+
+def index_to_one_hot(x, alphabet_size=4, device='cpu'):
+    # add one row of zeros because the -1 represents the absence of element and it is encoded with zeros
+    x = torch.cat((torch.eye(alphabet_size, device=device), torch.zeros((1, alphabet_size), device=device)), dim=0)[x]
+    return x
 
 class HypHC(nn.Module):
     """
@@ -39,40 +43,45 @@ class HypHC(nn.Module):
 
     def normalize_embeddings(self, embeddings):
         """Normalize leaves embeddings to have the lie on a diameter."""
-        min_scale = 1e-2 #self.init_size
+        min_scale = self.init_size
         max_scale = self.max_scale
+
         return F.normalize(embeddings, p=2, dim=1) * self.scale.clamp_min(min_scale).clamp_max(max_scale)
 
     def loss(self, triple_ids, similarities):
-        """Computes the HypHC loss.
+        """ Computes the HypHCEmbeddings loss.
         Args:
             triple_ids: B x 3 tensor with triple ids
+            sequences:  B x 3 x N tensor with elements indexes
             similarities: B x 3 tensor with pairwise similarities for triples 
                           [s12, s13, s23]
         """
-        e1 = self.embeddings(triple_ids[:, 0])
-        e2 = self.embeddings(triple_ids[:, 1])
-        e3 = self.embeddings(triple_ids[:, 2])
 
-        e1 = self.normalize_embeddings(e1)
-        e2 = self.normalize_embeddings(e2)
-        e3 = self.normalize_embeddings(e3)
+        B = similarities.shape[0]
 
-        d_12 = hyp_lca(e1, e2, return_coord=False)
-        d_13 = hyp_lca(e1, e3, return_coord=False)
-        d_23 = hyp_lca(e2, e3, return_coord=False)
+        triple_ids = triple_ids.reshape((3*B))
 
+        e = self.embeddings(triple_ids)
+        e = self.normalize_embeddings(e)
+        e = e.reshape((B, 3, -1))
+
+        d_12 = hyp_lca(e[:, 0], e[:, 1], return_coord=False)
+        d_13 = hyp_lca(e[:, 0], e[:, 2], return_coord=False)
+        d_23 = hyp_lca(e[:, 1], e[:, 2], return_coord=False)
         lca_norm = torch.cat([d_12, d_13, d_23], dim=-1)
         weights = torch.softmax(lca_norm / self.temperature, dim=-1)
         w_ord = torch.sum(similarities * weights, dim=-1, keepdim=True)
         total = torch.sum(similarities, dim=-1, keepdim=True) - w_ord
         return torch.mean(total)
 
-    def decode_tree(self, samples, fast_decoding):
+    def decode_tree(self, samples):
         """Build a binary tree (nx graph) from leaves' embeddings. Assume points are normalized to same radius."""
         leaves_embeddings = self.normalize_embeddings(self.embeddings.weight.data)
         leaves_embeddings = project(leaves_embeddings).detach().cpu()
-        sim_fn = lambda x, y: torch.sum(x * y, dim=-1)
+
+        ts = build_ts_from_embeddings(leaves_embeddings, samples)
+        
+        sim_fn = lambda x, y: torch.matmul(x, y.transpose(0, 1))
 
         # fast decoding
         parents = nn_merge_uf_fast_np(leaves_embeddings, S=sim_fn, partition_ratio=1.2)

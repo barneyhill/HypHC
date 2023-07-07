@@ -4,6 +4,77 @@ import tskit
 from collections import deque
 import numpy as np
 
+
+# Naive O(N^2) version, original algo 1 from 2020 paper
+def build_ts_from_embeddings(leaves_embeddings, samples):
+
+    # Assuming `leaves_embeddings` is a 2D tensor of shape [num_leaves, embedding_dim]
+
+    # Get the indices of the upper triangular part excluding the diagonal
+    triu_indices = torch.triu_indices(leaves_embeddings.size(0), leaves_embeddings.size(0), offset=1)
+
+    # Extract the embeddings corresponding to these indices
+    embeddings1 = leaves_embeddings[triu_indices[0]]
+    embeddings2 = leaves_embeddings[triu_indices[1]]
+
+    # Compute dot products
+    dot_products = (embeddings1 * embeddings2).sum(dim=1)
+
+    # Use argsort to get the indices in ascending order of dot products
+    tri_indices = torch.argsort(dot_products)
+    sorted_pairs = triu_indices.t()[tri_indices]
+
+    # Step 1: Initialize a TableCollection
+    tables = tskit.TableCollection(sequence_length=1.0) # Assuming sequence length is 1.0
+
+    # Step 2: Create a node map and set time as 0 for terminal nodes
+    node_map = {}
+    for sample in samples:
+        node_map[sample] = tables.nodes.add_row(time=0, flags=tskit.NODE_IS_SAMPLE)
+
+    # tree_id -> root node of tree
+    tree_roots = {sample: sample for sample in samples}
+
+    # node_id -> tree_id
+    node_to_tree = {sample: sample for sample in samples}
+
+    node_counter = max(samples) + 1
+
+    for pair in sorted_pairs:
+        # get tree_id of each node
+        tree_id1 = node_to_tree[int(pair[0])]
+        tree_id2 = node_to_tree[int(pair[1])]
+
+        if tree_id1 != tree_id2:
+            root1 = tree_roots[tree_id1]
+            root2 = tree_roots[tree_id2]
+
+            # Add a new root node joining root1 and root2:
+            # parent time: max child time + 1
+            t = max(tables.nodes[root1].time, tables.nodes[root2].time) + 1
+
+            node_map[node_counter] = tables.nodes.add_row(time=t)
+
+            # Add an edge from the parent to the child
+            tables.edges.add_row(left=0, right=1, parent=node_map[node_counter], child=node_map[root1])
+            tables.edges.add_row(left=0, right=1, parent=node_map[node_counter], child=node_map[root2])
+
+            node_to_tree[node_map[node_counter]] = tree_id1
+            tree_roots[tree_id1] = node_map[node_counter]
+
+            for key, value in node_to_tree.items():
+                if value == tree_id2:
+                    node_to_tree[key] = tree_id1
+
+            node_counter += 1
+
+    # Step 4: Sort and simplify the tables
+    tables.sort()
+    #tables.simplify(samples=[node_map[sample] for sample in samples])
+
+    # Step 5: Generate the tree sequence
+    return tables.tree_sequence()
+
 def build_ts_from_parents(parents, samples):
     # parents (N_samples), samples (N_samples)
 
@@ -152,3 +223,19 @@ def descendants_count(tree):
             assert node == stack.pop()
 
     return desc, left
+
+def map_mutations(inferred_ts, ts_data):
+    tree = inferred_ts.first()  # there's only one tree anyway
+    tables = inferred_ts.dump_tables()
+
+    for variant, site_pos in zip(ts_data["genotypes"].T, ts_data["sites"]):
+        ancestral_state, mutations = tree.map_mutations(variant, ("0", "1"))
+        site_id = tables.sites.add_row(position=site_pos, ancestral_state="0")
+        parent_offset = len(tables.mutations)
+        for mut in mutations:
+            parent = mut.parent
+            if parent != tskit.NULL:
+                parent += parent_offset
+            mut_id = tables.mutations.add_row(
+                site_id, node=mut.node, parent=parent, derived_state=mut.derived_state)
+    return tables.tree_sequence()

@@ -48,3 +48,25 @@ def nn_merge_uf_fast_np(xs, S, partition_ratio=None, verbose=False):
     uf = unionfind.UnionFind(n)
     uf.merge(ij)
     return uf.tree
+
+# Naive version
+def build_ts_from_embeddings(leaves_embeddings, samples):
+
+    # Assuming `leaves_embeddings` is a 2D tensor of shape [num_leaves, embedding_dim]
+
+    # Get the indices of the upper triangular part excluding the diagonal
+    triu_indices = torch.triu_indices(leaves_embeddings.size(0), leaves_embeddings.size(0), offset=1)
+
+    # Extract the embeddings corresponding to these indices
+    embeddings1 = leaves_embeddings[triu_indices[0]]
+    embeddings2 = leaves_embeddings[triu_indices[1]]
+
+    # Compute dot products
+    dot_products = (embeddings1 * embeddings2).sum(dim=1)
+
+    # Use argsort to get the indices in ascending order of dot products
+    tri_indices = torch.argsort(dot_products, descending=True)
+    sorted_pairs = triu_indices.t()[tri_indices]
+
+    for pair in sorted_pairs:
+        pass
